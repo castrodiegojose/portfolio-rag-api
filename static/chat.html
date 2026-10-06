@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diego — playground RAG</title>
+  <style>
+    :root {
+      --bg: #14120f;
+      --panel: #1c1916;
+      --line: #3a342c;
+      --ink: #f3ece3;
+      --muted: #a89a88;
+      --accent: #e0a050;
+      --user: #2a2621;
+      --bot: #231f1b;
+      --err: #c45c4a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      background: var(--bg);
+      color: var(--ink);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 100%;
+    }
+    header {
+      padding: 1.1rem 1.4rem 0.9rem;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    header p {
+      margin: 0.15rem 0 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .locale {
+      display: flex;
+      gap: 0.35rem;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.75rem;
+    }
+    .locale button {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      padding: 0.3rem 0.55rem;
+      cursor: pointer;
+    }
+    .locale button[aria-pressed="true"] {
+      color: var(--bg);
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    #log {
+      overflow-y: auto;
+      padding: 1.2rem 1.4rem 1.6rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+    }
+    .msg {
+      max-width: 38rem;
+      padding: 0.75rem 0.9rem;
+      border: 1px solid var(--line);
+      line-height: 1.45;
+      font-size: 0.98rem;
+      white-space: pre-wrap;
+    }
+    .msg.user { align-self: flex-end; background: var(--user); }
+    .msg.bot { align-self: flex-start; background: var(--bot); }
+    .msg.err { align-self: flex-start; border-color: var(--err); color: #f0c8c0; }
+    .msg .who {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .cites {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.65rem;
+    }
+    .cites span {
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 0.7rem;
+      color: var(--accent);
+      border: 1px solid var(--line);
+      padding: 0.15rem 0.4rem;
+    }
+    form {
+      border-top: 1px solid var(--line);
+      padding: 0.85rem 1.4rem 1.1rem;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.6rem;
+      background: var(--panel);
+    }
+    #message {
+      resize: none;
+      min-height: 2.8rem;
+      max-height: 8rem;
+      padding: 0.55rem 0.7rem;
+      background: var(--bg);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      font: inherit;
+    }
+    form button[type="submit"] {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--accent);
+      color: var(--bg);
+      border: 0;
+      padding: 0 1.1rem;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    form button:disabled { opacity: 0.45; cursor: wait; }
+    .hints {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .hints button {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.75rem;
+      background: transparent;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      padding: 0.2rem 0.5rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Playground del portfolio</h1>
+      <p>Misma API que el front: <code>POST /chat</code>. Ingestá antes con debug.</p>
+    </div>
+    <div class="locale" role="group" aria-label="Idioma">
+      <button type="button" data-locale="es" aria-pressed="true">ES</button>
+      <button type="button" data-locale="en" aria-pressed="false">EN</button>
+    </div>
+  </header>
+  <div id="log" aria-live="polite"></div>
+  <form id="form">
+    <div class="hints">
+      <button type="button" data-q="OpenDev">OpenDev</button>
+      <button type="button" data-q="Stripe">Stripe</button>
+      <button type="button" data-q="quién sos">quién sos</button>
+    </div>
+    <textarea id="message" name="message" rows="2" required placeholder="Pregunta o keywords…"></textarea>
+    <button type="submit" id="send">Enviar</button>
+  </form>
+  <script>
+    const log = document.getElementById("log");
+    const form = document.getElementById("form");
+    const input = document.getElementById("message");
+    const send = document.getElementById("send");
+    const localeBtns = document.querySelectorAll("[data-locale]");
+    const sessionKey = "portfolio-rag-session";
+    let locale = "es";
+    let sessionId = sessionStorage.getItem(sessionKey);
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      sessionStorage.setItem(sessionKey, sessionId);
+    }
+
+    localeBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        locale = btn.dataset.locale;
+        localeBtns.forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+      });
+    });
+
+    document.querySelectorAll("[data-q]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        input.value = btn.dataset.q;
+        input.focus();
+      });
+    });
+
+    function addMsg(role, text, citations) {
+      const art = document.createElement("article");
+      art.className = "msg " + role;
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent = role === "user" ? "Vos" : role === "err" ? "Error" : "Diego";
+      const body = document.createElement("div");
+      body.textContent = text;
+      art.append(who, body);
+      if (citations && citations.length) {
+        const row = document.createElement("div");
+        row.className = "cites";
+        citations.forEach((c) => {
+          const chip = document.createElement("span");
+          chip.textContent = (c.source || "") + (c.section ? " · " + c.section : "");
+          row.append(chip);
+        });
+        art.append(row);
+      }
+      log.append(art);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const message = input.value.trim();
+      if (!message || send.disabled) return;
+      input.value = "";
+      addMsg("user", message);
+      send.disabled = true;
+      try {
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, locale, message }),
+        });
+        if (!res.ok) {
+          let detail = "Chat failed.";
+          if (res.status === 404) detail = "No hay índice. Corré POST /debug/ingest.";
+          else if (res.status === 503) detail = "Ollama no está disponible.";
+          else if (res.status === 422) detail = "Pedido inválido.";
+          addMsg("err", detail);
+          return;
+        }
+        const data = await res.json();
+        addMsg("bot", data.reply || "(vacío)", data.citations || []);
+      } catch {
+        addMsg("err", "No se pudo hablar con la API.");
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>
